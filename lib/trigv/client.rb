@@ -4,6 +4,8 @@ require 'json'
 require 'net/http'
 require 'uri'
 
+require_relative 'retry'
+
 module Trigv
   Event = Struct.new(
     :public_id, :event_uuid, :status, :level, :event_type, :target_device_count, :received_at,
@@ -28,6 +30,8 @@ module Trigv
       api_key ||= ENV.fetch('TRIGV_API_KEY', nil)
       api_key = api_key&.strip
       raise ValidationError, 'api_key is required (or set TRIGV_API_KEY)' if api_key.nil? || api_key.empty?
+      raise ValidationError, 'max_retries must be zero or greater' if max_retries.negative?
+      raise ValidationError, 'timeout must be greater than zero' if timeout <= 0
 
       @api_key = api_key
       @base_url = base_url.to_s.chomp('/')
@@ -43,25 +47,22 @@ module Trigv
       body = Validation.validate_send_event_params(params)
       has_idempotency = body.key?('idempotency_key')
 
-      request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed|
+      request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed, _headers|
         if [200, 202].include?(status) && parsed&.dig('event')
           event = parse_event(parsed['event'])
           SendEventResult.new(event: event, duplicate: status == 200)
         else
-          error_from_response(status, parsed)
+          error_from_response(status, parsed, _headers)
         end
       end
     end
 
     def verify_connection
-      request_with_retry(:get, '/v1/connection', nil, allow_retry: true) do |status, parsed|
+      request_with_retry(:get, '/v1/connection', nil, allow_retry: true) do |status, parsed, headers|
         if status == 200 && parsed&.dig('workspace') && parsed['api_key']
-          ConnectionResult.new(
-            workspace: ConnectionWorkspace.new(**symbolize_keys(parsed['workspace'])),
-            api_key: ConnectionApiKey.new(**symbolize_keys(parsed['api_key']))
-          )
+          parse_connection_result(parsed)
         else
-          error_from_response(status, parsed)
+          error_from_response(status, parsed, headers)
         end
       end
     end
@@ -72,17 +73,26 @@ module Trigv
       last_error = nil
 
       (0..max_retries).each do |attempt|
-        status, parsed = request_once(method, path, body)
-        return yield(status, parsed)
+        status, parsed, headers = request_once(method, path, body)
+        return yield(status, parsed, headers)
       rescue StandardError => e
         last_error = e
         raise e unless allow_retry && attempt < max_retries
         raise e unless retryable_error?(e)
 
-        sleep((0.5 * (2**attempt)) + (rand * 0.25))
+        wait = retry_wait_seconds(e, attempt)
+        sleep([wait, timeout].min)
       end
 
       raise last_error
+    end
+
+    def retry_wait_seconds(error, attempt)
+      if error.is_a?(RateLimitError) && error.retry_after_seconds
+        return error.retry_after_seconds
+      end
+
+      (0.5 * (2**attempt)) + (rand * 0.25)
     end
 
     def retryable_error?(error)
@@ -110,8 +120,9 @@ module Trigv
       request = build_request(method, uri, body)
       response = http.request(request)
       parsed = parse_json(response.body)
+      response_headers = response.each_header.to_h.transform_keys(&:downcase)
 
-      [response.code.to_i, parsed]
+      [response.code.to_i, parsed, response_headers]
     rescue Net::OpenTimeout, Net::ReadTimeout, Timeout::Error
       raise TimeoutError
     rescue ValidationError, AuthenticationError, AuthorizationError, NotFoundError,
@@ -174,11 +185,36 @@ module Trigv
       )
     end
 
+    def parse_connection_result(parsed)
+      workspace_data = parsed['workspace']
+      api_key_data = parsed['api_key']
+
+      unless workspace_data.is_a?(Hash) && api_key_data.is_a?(Hash)
+        raise ValidationError.new('Invalid connection response payload', {})
+      end
+
+      required_workspace = %w[public_id name]
+      required_api_key = %w[public_id name prefix]
+      missing_workspace = required_workspace.reject { |key| workspace_data[key].is_a?(String) && !workspace_data[key].empty? }
+      missing_api_key = required_api_key.reject { |key| api_key_data[key].is_a?(String) && !api_key_data[key].empty? }
+
+      unless missing_workspace.empty? && missing_api_key.empty?
+        raise ValidationError.new('Invalid connection response payload', {})
+      end
+
+      ConnectionResult.new(
+        workspace: ConnectionWorkspace.new(**symbolize_keys(workspace_data)),
+        api_key: ConnectionApiKey.new(**symbolize_keys(api_key_data))
+      )
+    rescue ArgumentError, KeyError, TypeError
+      raise ValidationError.new('Invalid connection response payload', {})
+    end
+
     def symbolize_keys(hash)
       hash.transform_keys(&:to_sym)
     end
 
-    def error_from_response(status, body)
+    def error_from_response(status, body, headers = {})
       message = body&.fetch('message', nil) || "Trigv API returned HTTP #{status}"
 
       case status
@@ -191,7 +227,12 @@ module Trigv
       when 422
         raise ValidationError.new(message, body&.fetch('errors', {}) || {})
       when 429
-        raise RateLimitError.new(message, retryable: !Errors.monthly_limit_message?(message))
+        retry_after = Retry.parse_retry_after(headers['retry-after'])
+        raise RateLimitError.new(
+          message,
+          retryable: !Errors.monthly_limit_message?(message),
+          retry_after_seconds: retry_after
+        )
       else
         raise ApiError.new(message, status, body)
       end

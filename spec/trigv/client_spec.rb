@@ -194,4 +194,42 @@ RSpec.describe Trigv::Client do
       client.send_event(channel: 'general', title: 'x', api_key: 'secret')
     end.to raise_error(Trigv::ValidationError)
   end
+
+  it 'rejects negative max_retries' do
+    expect do
+      described_class.new(api_key: api_key, max_retries: -1)
+    end.to raise_error(Trigv::ValidationError, /max_retries/)
+  end
+
+  it 'retries burst 429 with Retry-After header' do
+    client = described_class.new(api_key: api_key, max_retries: 2)
+    calls = 0
+    stub_request(:post, "#{base_url}/v1/events")
+      .to_return do
+        calls += 1
+        if calls == 1
+          { status: 429, body: { message: 'Too many requests for this API key.' }.to_json,
+            headers: { 'Content-Type' => 'application/json', 'Retry-After' => '1' } }
+        else
+          { status: 202, body: { event: sample_event }.to_json,
+            headers: { 'Content-Type' => 'application/json' } }
+        end
+      end
+
+    allow(client).to receive(:sleep)
+
+    client.send_event(channel: 'general', title: 'x', idempotency_key: 'k1')
+    expect(calls).to eq(2)
+  end
+
+  it 'raises ValidationError for malformed connection payload' do
+    stub_request(:get, "#{base_url}/v1/connection")
+      .to_return(
+        status: 200,
+        body: { workspace: { public_id: 'ws_1' }, api_key: { public_id: 'key_1' } }.to_json,
+        headers: { 'Content-Type' => 'application/json' }
+      )
+
+    expect { client.verify_connection }.to raise_error(Trigv::ValidationError, /Invalid connection/)
+  end
 end

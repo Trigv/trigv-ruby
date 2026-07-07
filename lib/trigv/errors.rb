@@ -44,12 +44,13 @@ module Trigv
   end
 
   class RateLimitError < Error
-    attr_reader :status_code, :retryable
+    attr_reader :status_code, :retryable, :retry_after_seconds
 
-    def initialize(message, retryable: true)
+    def initialize(message, retryable: true, retry_after_seconds: nil)
       super(message)
       @status_code = 429
       @retryable = retryable
+      @retry_after_seconds = retry_after_seconds
     end
   end
 
