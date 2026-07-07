@@ -1,0 +1,200 @@
+# frozen_string_literal: true
+
+require 'json'
+require 'net/http'
+require 'uri'
+
+module Trigv
+  Event = Struct.new(
+    :public_id, :event_uuid, :status, :level, :event_type, :target_device_count, :received_at,
+    keyword_init: true
+  )
+
+  SendEventResult = Struct.new(:event, :duplicate, keyword_init: true)
+
+  ConnectionWorkspace = Struct.new(:public_id, :name, keyword_init: true)
+  ConnectionApiKey = Struct.new(:public_id, :name, :prefix, keyword_init: true)
+  ConnectionResult = Struct.new(:workspace, :api_key, keyword_init: true)
+
+  class Client
+    attr_reader :api_key, :base_url, :timeout, :max_retries
+
+    def initialize(
+      api_key: nil,
+      base_url: Validation::DEFAULT_BASE_URL,
+      timeout: Validation::DEFAULT_TIMEOUT,
+      max_retries: Validation::MAX_RETRIES
+    )
+      api_key ||= ENV.fetch('TRIGV_API_KEY', nil)
+      api_key = api_key&.strip
+      raise ValidationError, 'api_key is required (or set TRIGV_API_KEY)' if api_key.nil? || api_key.empty?
+
+      @api_key = api_key
+      @base_url = base_url.to_s.chomp('/')
+      @timeout = timeout
+      @max_retries = max_retries
+    end
+
+    def user_agent
+      "trigv-ruby/#{VERSION}"
+    end
+
+    def send_event(**params)
+      body = Validation.validate_send_event_params(params)
+      has_idempotency = body.key?('idempotency_key')
+
+      request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed|
+        if [200, 202].include?(status) && parsed&.dig('event')
+          event = parse_event(parsed['event'])
+          SendEventResult.new(event: event, duplicate: status == 200)
+        else
+          error_from_response(status, parsed)
+        end
+      end
+    end
+
+    def verify_connection
+      request_with_retry(:get, '/v1/connection', nil, allow_retry: true) do |status, parsed|
+        if status == 200 && parsed&.dig('workspace') && parsed['api_key']
+          ConnectionResult.new(
+            workspace: ConnectionWorkspace.new(**symbolize_keys(parsed['workspace'])),
+            api_key: ConnectionApiKey.new(**symbolize_keys(parsed['api_key']))
+          )
+        else
+          error_from_response(status, parsed)
+        end
+      end
+    end
+
+    private
+
+    def request_with_retry(method, path, body, allow_retry:)
+      last_error = nil
+
+      (0..max_retries).each do |attempt|
+        status, parsed = request_once(method, path, body)
+        return yield(status, parsed)
+      rescue StandardError => e
+        last_error = e
+        raise e unless allow_retry && attempt < max_retries
+        raise e unless retryable_error?(e)
+
+        sleep((0.5 * (2**attempt)) + (rand * 0.25))
+      end
+
+      raise last_error
+    end
+
+    def retryable_error?(error)
+      case error
+      when ValidationError, AuthenticationError, AuthorizationError, NotFoundError
+        false
+      when RateLimitError
+        error.retryable
+      when ApiError
+        retryable_status?(error.status_code)
+      when NetworkError, TimeoutError
+        true
+      else
+        false
+      end
+    end
+
+    def retryable_status?(status)
+      [429, 502, 503, 504].include?(status)
+    end
+
+    def request_once(method, path, body)
+      uri = build_uri(path)
+      http = build_http(uri)
+      request = build_request(method, uri, body)
+      response = http.request(request)
+      parsed = parse_json(response.body)
+
+      [response.code.to_i, parsed]
+    rescue Net::OpenTimeout, Net::ReadTimeout, Timeout::Error
+      raise TimeoutError
+    rescue ValidationError, AuthenticationError, AuthorizationError, NotFoundError,
+           RateLimitError, ApiError, TimeoutError
+      raise
+    rescue StandardError => e
+      raise NetworkError.new(e.message, e)
+    end
+
+    def build_uri(path)
+      URI("#{@base_url}#{path}")
+    end
+
+    def build_http(uri)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      http.open_timeout = timeout
+      http.read_timeout = timeout
+      http
+    end
+
+    def build_request(method, uri, body)
+      request =
+        case method
+        when :get then Net::HTTP::Get.new(uri)
+        when :post then Net::HTTP::Post.new(uri)
+        else
+          raise ArgumentError, "Unsupported HTTP method: #{method}"
+        end
+
+      request['Accept'] = 'application/json'
+      request['Authorization'] = "Bearer #{@api_key}"
+      request['User-Agent'] = user_agent
+
+      if body
+        request['Content-Type'] = 'application/json'
+        request.body = JSON.generate(body)
+      end
+
+      request
+    end
+
+    def parse_json(text)
+      return nil if text.nil? || text.empty?
+
+      JSON.parse(text)
+    rescue JSON::ParserError
+      nil
+    end
+
+    def parse_event(data)
+      Event.new(
+        public_id: data['public_id'],
+        event_uuid: data['event_uuid'],
+        status: data['status'],
+        level: data['level'],
+        event_type: data['event_type'],
+        target_device_count: data['target_device_count'],
+        received_at: data['received_at']
+      )
+    end
+
+    def symbolize_keys(hash)
+      hash.transform_keys(&:to_sym)
+    end
+
+    def error_from_response(status, body)
+      message = body&.fetch('message', nil) || "Trigv API returned HTTP #{status}"
+
+      case status
+      when 401
+        raise AuthenticationError, message
+      when 403
+        raise AuthorizationError, message
+      when 404
+        raise NotFoundError, message
+      when 422
+        raise ValidationError.new(message, body&.fetch('errors', {}) || {})
+      when 429
+        raise RateLimitError.new(message, retryable: !Errors.monthly_limit_message?(message))
+      else
+        raise ApiError.new(message, status, body)
+      end
+    end
+  end
+end

@@ -1,0 +1,83 @@
+inherit_mode:
+  merge:
+    - Exclude
+
+plugins:
+  - rubocop-rspec
+
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.2
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+
+Style/Documentation:
+  Enabled: false
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
+
+Metrics/BlockLength:
+  Exclude:
+    - 'spec/**/*'
+
+Metrics/MethodLength:
+  Max: 60
+  Exclude:
+    - 'lib/trigv/validation.rb'
+
+Metrics/AbcSize:
+  Max: 65
+  Exclude:
+    - 'lib/trigv/validation.rb'
+
+Metrics/CyclomaticComplexity:
+  Max: 15
+  Exclude:
+    - 'lib/trigv/validation.rb'
+    - 'lib/trigv/client.rb'
+
+Metrics/PerceivedComplexity:
+  Max: 15
+  Exclude:
+    - 'lib/trigv/validation.rb'
+
+Metrics/ClassLength:
+  Max: 200
+
+Naming/VariableNumber:
+  AllowedIdentifiers:
+    - delivery_urgency
+
+Lint/DuplicateBranch:
+  Exclude:
+    - 'lib/trigv/client.rb'
+
+Lint/ShadowedException:
+  Exclude:
+    - 'lib/trigv/client.rb'
+
+Style/SuperArguments:
+  Exclude:
+    - 'lib/trigv/errors.rb'
+
+RSpec/MultipleExpectations:
+  Enabled: false
+
+RSpec/ExampleLength:
+  Max: 20
+
+RSpec/MultipleDescribes:
+  Exclude:
+    - 'spec/**/*'
+
+RSpec/LeakyConstantDeclaration:
+  Enabled: false
+
+Layout/LineLength:
+  Max: 130
+  Exclude:
+    - 'spec/**/*'
