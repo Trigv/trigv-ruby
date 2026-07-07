@@ -11,7 +11,8 @@ result = client.send_event(
   level: 'success',
   delivery_urgency: 'standard',
   event_type: 'deploy.completed',
-  idempotency_key: 'deploy-prod-42'
+  idempotency_key: 'deploy-prod-42',
+  url: 'https://example.com/deployments/42'
 )
 
 puts result.event.public_id

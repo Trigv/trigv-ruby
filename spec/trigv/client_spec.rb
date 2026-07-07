@@ -45,26 +45,35 @@ RSpec.describe Trigv::Client do
   end
 
   it 'sends all optional fields' do
-    body = {
+    captured = nil
+    stub_request(:post, "#{base_url}/v1/events")
+      .to_return do |request|
+        captured = JSON.parse(request.body)
+        { status: 202, body: { event: sample_event.merge('level' => 'success') }.to_json,
+          headers: { 'Content-Type' => 'application/json' } }
+      end
+
+    client.send_event(
       channel: 'deploys',
       title: 'Production deploy complete',
       description: 'Build #42 succeeded in 38s (commit abc1234)',
       level: 'success',
       delivery_urgency: 'standard',
       event_type: 'deploy.completed',
-      idempotency_key: 'deploy-prod-42'
-    }
+      idempotency_key: 'deploy-prod-42',
+      url: 'https://example.com/deployments/42'
+    )
 
-    stub_request(:post, "#{base_url}/v1/events")
-      .with(body: body.to_json)
-      .to_return(
-        status: 202,
-        body: { event: sample_event.merge('level' => 'success') }.to_json,
-        headers: { 'Content-Type' => 'application/json' }
-      )
-
-    client.send_event(**body)
-    expect(WebMock).to have_requested(:post, "#{base_url}/v1/events").once
+    expect(captured).to include(
+      'channel' => 'deploys',
+      'title' => 'Production deploy complete',
+      'description' => 'Build #42 succeeded in 38s (commit abc1234)',
+      'url' => 'https://example.com/deployments/42',
+      'level' => 'success',
+      'delivery_urgency' => 'standard',
+      'event_type' => 'deploy.completed',
+      'idempotency_key' => 'deploy-prod-42'
+    )
   end
 
   it 'rejects invalid level client-side' do
@@ -231,5 +240,23 @@ RSpec.describe Trigv::Client do
       )
 
     expect { client.verify_connection }.to raise_error(Trigv::ValidationError, /Invalid connection/)
+  end
+
+  it 'omits url when not provided' do
+    captured = nil
+    stub_request(:post, "#{base_url}/v1/events")
+      .to_return do |request|
+        captured = JSON.parse(request.body)
+        { status: 202, body: { event: sample_event }.to_json, headers: { 'Content-Type' => 'application/json' } }
+      end
+
+    client.send_event(channel: 'general', title: 'x')
+    expect(captured).not_to have_key('url')
+  end
+
+  it 'rejects over-length url' do
+    expect do
+      client.send_event(channel: 'general', title: 'x', url: "https://example.com/#{'a' * 2040}")
+    end.to raise_error(Trigv::ValidationError)
   end
 end

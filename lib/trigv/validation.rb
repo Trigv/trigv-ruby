@@ -14,6 +14,7 @@ module Trigv
       title: 255,
       description: 1000,
       image_url: 2048,
+      url: 2048,
       event_type: 120,
       idempotency_key: 190
     }.freeze
@@ -21,7 +22,7 @@ module Trigv
     PROHIBITED_FIELDS = %w[api_key icon].freeze
 
     ALLOWED_EVENT_KEYS = %i[
-      channel title description image_url level delivery_urgency event_type idempotency_key
+      channel title description image_url url level delivery_urgency event_type idempotency_key
     ].freeze
 
     module_function
@@ -65,6 +66,12 @@ module Trigv
       if image_url
         assert_max_length('image_url', image_url, FIELD_MAX_LENGTHS[:image_url])
         body['image_url'] = image_url
+      end
+
+      url = trim(params[:url])
+      if url
+        assert_max_length('url', url, FIELD_MAX_LENGTHS[:url])
+        body['url'] = url
       end
 
       level = trim(params[:level])
