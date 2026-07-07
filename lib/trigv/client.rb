@@ -47,12 +47,12 @@ module Trigv
       body = Validation.validate_send_event_params(params)
       has_idempotency = body.key?('idempotency_key')
 
-      request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed, _headers|
+      request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed, headers|
         if [200, 202].include?(status) && parsed&.dig('event')
           event = parse_event(parsed['event'])
           SendEventResult.new(event: event, duplicate: status == 200)
         else
-          error_from_response(status, parsed, _headers)
+          error_from_response(status, parsed, headers)
         end
       end
     end
@@ -88,9 +88,7 @@ module Trigv
     end
 
     def retry_wait_seconds(error, attempt)
-      if error.is_a?(RateLimitError) && error.retry_after_seconds
-        return error.retry_after_seconds
-      end
+      return error.retry_after_seconds if error.is_a?(RateLimitError) && error.retry_after_seconds
 
       (0.5 * (2**attempt)) + (rand * 0.25)
     end
