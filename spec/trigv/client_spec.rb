@@ -20,6 +20,19 @@ RSpec.describe Trigv::Client do
 
   let(:client) { described_class.new(api_key: api_key, max_retries: 0) }
 
+  let(:full_event_params) do
+    {
+      channel: 'deploys',
+      title: 'Production deploy complete',
+      description: 'Build #42 succeeded in 38s (commit abc1234)',
+      level: 'success',
+      delivery_urgency: 'standard',
+      event_type: 'deploy.completed',
+      idempotency_key: 'deploy-prod-42',
+      url: 'https://example.com/deployments/42'
+    }
+  end
+
   it 'requires an API key' do
     expect { described_class.new(api_key: '') }.to raise_error(Trigv::ValidationError)
   end
@@ -53,27 +66,8 @@ RSpec.describe Trigv::Client do
           headers: { 'Content-Type' => 'application/json' } }
       end
 
-    client.send_event(
-      channel: 'deploys',
-      title: 'Production deploy complete',
-      description: 'Build #42 succeeded in 38s (commit abc1234)',
-      level: 'success',
-      delivery_urgency: 'standard',
-      event_type: 'deploy.completed',
-      idempotency_key: 'deploy-prod-42',
-      url: 'https://example.com/deployments/42'
-    )
-
-    expect(captured).to include(
-      'channel' => 'deploys',
-      'title' => 'Production deploy complete',
-      'description' => 'Build #42 succeeded in 38s (commit abc1234)',
-      'url' => 'https://example.com/deployments/42',
-      'level' => 'success',
-      'delivery_urgency' => 'standard',
-      'event_type' => 'deploy.completed',
-      'idempotency_key' => 'deploy-prod-42'
-    )
+    client.send_event(**full_event_params)
+    expect(captured).to include(full_event_params.transform_keys(&:to_s))
   end
 
   it 'rejects invalid level client-side' do
