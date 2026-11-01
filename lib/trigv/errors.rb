@@ -2,6 +2,9 @@
 
 module Trigv
   class Error < StandardError
+    # Value of the X-Request-ID response header, when the API answered.
+    attr_accessor :request_id
+
     def initialize(message = nil)
       super
     end
@@ -44,12 +47,33 @@ module Trigv
   end
 
   class RateLimitError < Error
-    attr_reader :status_code, :retryable, :retry_after_seconds
+    attr_reader :status_code, :retry_after_seconds
 
-    def initialize(message, retryable: true, retry_after_seconds: nil)
+    def initialize(message, retry_after_seconds: nil)
       super(message)
       @status_code = 429
-      @retryable = retryable
+      @retry_after_seconds = retry_after_seconds
+    end
+  end
+
+  # HTTP 409: another request is delivering the same idempotency_key.
+  class ConflictError < Error
+    attr_reader :status_code, :retry_after_seconds
+
+    def initialize(message, retry_after_seconds: nil)
+      super(message)
+      @status_code = 409
+      @retry_after_seconds = retry_after_seconds
+    end
+  end
+
+  # HTTP 503: push delivery is unavailable. Retry with the same idempotency_key.
+  class ServiceUnavailableError < Error
+    attr_reader :status_code, :retry_after_seconds
+
+    def initialize(message, retry_after_seconds: nil)
+      super(message)
+      @status_code = 503
       @retry_after_seconds = retry_after_seconds
     end
   end
@@ -76,14 +100,6 @@ module Trigv
   class TimeoutError < Error
     def initialize(message = 'Request timed out')
       super
-    end
-  end
-
-  module Errors
-    module_function
-
-    def monthly_limit_message?(message)
-      message.include?('Monthly event limit')
     end
   end
 end

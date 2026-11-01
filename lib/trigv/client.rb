@@ -88,7 +88,7 @@ module Trigv
     end
 
     def retry_wait_seconds(error, attempt)
-      return error.retry_after_seconds if error.is_a?(RateLimitError) && error.retry_after_seconds
+      return error.retry_after_seconds if error.respond_to?(:retry_after_seconds) && error.retry_after_seconds
 
       (0.5 * (2**attempt)) + (rand * 0.25)
     end
@@ -97,8 +97,8 @@ module Trigv
       case error
       when ValidationError, AuthenticationError, AuthorizationError, NotFoundError
         false
-      when RateLimitError
-        error.retryable
+      when RateLimitError, ConflictError, ServiceUnavailableError
+        true
       when ApiError
         retryable_status?(error.status_code)
       when NetworkError, TimeoutError
@@ -109,7 +109,7 @@ module Trigv
     end
 
     def retryable_status?(status)
-      [429, 502, 503, 504].include?(status)
+      [502, 504].include?(status)
     end
 
     def request_once(method, path, body)
@@ -123,8 +123,7 @@ module Trigv
       [response.code.to_i, parsed, response_headers]
     rescue Net::OpenTimeout, Net::ReadTimeout, Timeout::Error
       raise TimeoutError
-    rescue ValidationError, AuthenticationError, AuthorizationError, NotFoundError,
-           RateLimitError, ApiError, TimeoutError
+    rescue Error
       raise
     rescue StandardError => e
       raise NetworkError.new(e.message, e)
@@ -214,26 +213,22 @@ module Trigv
 
     def error_from_response(status, body, headers = {})
       message = body&.fetch('message', nil) || "Trigv API returned HTTP #{status}"
+      retry_after = Retry.parse_retry_after(headers['retry-after'])
 
-      case status
-      when 401
-        raise AuthenticationError, message
-      when 403
-        raise AuthorizationError, message
-      when 404
-        raise NotFoundError, message
-      when 422
-        raise ValidationError.new(message, body&.fetch('errors', {}) || {})
-      when 429
-        retry_after = Retry.parse_retry_after(headers['retry-after'])
-        raise RateLimitError.new(
-          message,
-          retryable: !Errors.monthly_limit_message?(message),
-          retry_after_seconds: retry_after
-        )
-      else
-        raise ApiError.new(message, status, body)
-      end
+      error =
+        case status
+        when 401 then AuthenticationError.new(message)
+        when 403 then AuthorizationError.new(message)
+        when 404 then NotFoundError.new(message)
+        when 409 then ConflictError.new(message, retry_after_seconds: retry_after)
+        when 422 then ValidationError.new(message, body&.fetch('errors', {}) || {})
+        when 429 then RateLimitError.new(message, retry_after_seconds: retry_after)
+        when 503 then ServiceUnavailableError.new(message, retry_after_seconds: retry_after)
+        else ApiError.new(message, status, body)
+        end
+
+      error.request_id = headers['x-request-id']
+      raise error
     end
   end
 end

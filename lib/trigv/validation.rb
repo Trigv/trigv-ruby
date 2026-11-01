@@ -2,7 +2,7 @@
 
 module Trigv
   module Validation
-    DEFAULT_BASE_URL = 'https://api.trigv.com/api'
+    DEFAULT_BASE_URL = 'https://api.trigv.com'
     DEFAULT_TIMEOUT = 30
     MAX_RETRIES = 2
 

@@ -4,13 +4,13 @@ require 'spec_helper'
 
 RSpec.describe Trigv::Client do
   let(:api_key) { 'trgv_testkey1_abcdefghijklmnopqrstuvwxyz123456' }
-  let(:base_url) { 'https://api.trigv.com/api' }
+  let(:base_url) { 'https://api.trigv.com' }
 
   let(:sample_event) do
     {
-      'public_id' => 'evt_abc',
+      'public_id' => '01JXXXXXXXXXXXXXXXXXXXXXXX',
       'event_uuid' => '550e8400-e29b-41d4-a716-446655440000',
-      'status' => 'queued',
+      'status' => 'sent',
       'level' => 'info',
       'event_type' => nil,
       'target_device_count' => 1,
@@ -54,7 +54,7 @@ RSpec.describe Trigv::Client do
 
     expect(stub).to have_been_requested
     expect(result.duplicate).to be(false)
-    expect(result.event.public_id).to eq('evt_abc')
+    expect(result.event.public_id).to eq('01JXXXXXXXXXXXXXXXXXXXXXXX')
   end
 
   it 'sends all optional fields' do
@@ -106,21 +106,6 @@ RSpec.describe Trigv::Client do
     end.to raise_error(Trigv::NotFoundError)
   end
 
-  it 'distinguishes monthly rate limit as non-retryable' do
-    client = described_class.new(api_key: api_key, max_retries: 2)
-
-    stub_request(:post, "#{base_url}/v1/events")
-      .to_return(
-        status: 429,
-        body: { message: 'Monthly event limit reached for this workspace.' }.to_json,
-        headers: { 'Content-Type' => 'application/json' }
-      )
-
-    expect do
-      client.send_event(channel: 'general', title: 'x')
-    end.to raise_error(Trigv::RateLimitError) { |error| expect(error.retryable).to be(false) }
-  end
-
   it 'retries burst rate limit when idempotency key set' do
     client = described_class.new(api_key: api_key, max_retries: 2)
     calls = 0
@@ -141,7 +126,7 @@ RSpec.describe Trigv::Client do
 
     result = client.send_event(channel: 'general', title: 'x', idempotency_key: 'k1')
     expect(calls).to eq(2)
-    expect(result.event.public_id).to eq('evt_abc')
+    expect(result.event.public_id).to eq('01JXXXXXXXXXXXXXXXXXXXXXXX')
   end
 
   it 'verify_connection returns metadata' do
@@ -252,5 +237,119 @@ RSpec.describe Trigv::Client do
     expect do
       client.send_event(channel: 'general', title: 'x', url: "https://example.com/#{'a' * 2040}")
     end.to raise_error(Trigv::ValidationError)
+  end
+
+  describe 'base URL' do
+    it 'defaults to https://api.trigv.com/v1/events' do
+      stub = stub_request(:post, 'https://api.trigv.com/v1/events')
+             .to_return(status: 202, body: { event: sample_event }.to_json)
+
+      described_class.new(api_key: api_key).send_event(channel: 'general', title: 'x')
+      expect(stub).to have_been_requested
+    end
+
+    it 'keeps working with the old /api base URL' do
+      stub = stub_request(:post, 'https://api.trigv.com/api/v1/events')
+             .to_return(status: 202, body: { event: sample_event }.to_json)
+
+      described_class.new(api_key: api_key, base_url: 'https://api.trigv.com/api/')
+                     .send_event(channel: 'general', title: 'x')
+      expect(stub).to have_been_requested
+    end
+
+    it 'builds /v1/connection from the default base URL' do
+      stub = stub_request(:get, 'https://api.trigv.com/v1/connection')
+             .to_return(status: 200, body: {
+               workspace: { public_id: '01JXXXXXXXXXXXXXXXXXXXXXXX', name: 'Acme' },
+               api_key: { public_id: '01JXXXXXXXXXXXXXXXXXXXXXXX', name: 'Prod', prefix: 'trgv_abcd1234' }
+             }.to_json)
+
+      described_class.new(api_key: api_key).verify_connection
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe 'error statuses' do
+    def headers
+      { 'Retry-After' => '7', 'X-Request-ID' => '01JREQXXXXXXXXXXXXXXXXXXXX' }
+    end
+
+    def stub_status(status, extra = {})
+      stub_request(:post, "#{base_url}/v1/events")
+        .to_return(status: status, body: { message: 'nope' }.to_json, headers: headers.merge(extra))
+    end
+
+    it 'maps 409 to ConflictError with Retry-After and request id' do
+      stub_status(409)
+      expect { client.send_event(channel: 'general', title: 'x') }.to raise_error(Trigv::ConflictError) do |e|
+        expect(e.status_code).to eq(409)
+        expect(e.retry_after_seconds).to eq(7)
+        expect(e.request_id).to eq('01JREQXXXXXXXXXXXXXXXXXXXX')
+      end
+    end
+
+    it 'maps 503 to ServiceUnavailableError with Retry-After' do
+      stub_status(503)
+      expect { client.send_event(channel: 'general', title: 'x') }.to raise_error(Trigv::ServiceUnavailableError) do |e|
+        expect(e.retry_after_seconds).to eq(7)
+      end
+    end
+
+    it 'maps 429 to RateLimitError with Retry-After and request id' do
+      stub_status(429)
+      expect { client.send_event(channel: 'general', title: 'x') }.to raise_error(Trigv::RateLimitError) do |e|
+        expect(e.retry_after_seconds).to eq(7)
+        expect(e.request_id).to eq('01JREQXXXXXXXXXXXXXXXXXXXX')
+      end
+    end
+
+    it 'maps 422 (bad JSON body) to ValidationError and does not retry' do
+      retrying = described_class.new(api_key: api_key, max_retries: 2)
+      stub = stub_request(:post, "#{base_url}/v1/events")
+             .to_return(status: 422, body: { message: 'The channel field is required.',
+                                             errors: { 'channel' => ['The channel field is required.'] } }.to_json)
+
+      expect { retrying.send_event(channel: 'general', title: 'x', idempotency_key: 'k') }
+        .to raise_error(Trigv::ValidationError) { |e| expect(e.errors).to eq('channel' => ['The channel field is required.']) }
+      expect(stub).to have_been_requested.once
+    end
+
+    it 'treats 200 already stored as duplicate' do
+      stub_request(:post, "#{base_url}/v1/events")
+        .to_return(status: 200, body: { event: sample_event, message: 'already stored' }.to_json)
+
+      result = client.send_event(channel: 'general', title: 'x', idempotency_key: 'k')
+      expect(result.duplicate).to be(true)
+    end
+
+    [409, 503].each do |status|
+      it "retries #{status} with the same key after Retry-After" do
+        retrying = described_class.new(api_key: api_key, max_retries: 2)
+        bodies = []
+        calls = 0
+        stub_request(:post, "#{base_url}/v1/events").to_return do |request|
+          calls += 1
+          bodies << request.body
+          if calls == 1
+            { status: status, body: { message: 'retry' }.to_json, headers: { 'Retry-After' => '3' } }
+          else
+            { status: 202, body: { event: sample_event }.to_json }
+          end
+        end
+        allow(retrying).to receive(:sleep)
+
+        retrying.send_event(channel: 'general', title: 'x', idempotency_key: 'k1')
+        expect(calls).to eq(2)
+        expect(bodies.uniq.length).to eq(1)
+        expect(retrying).to have_received(:sleep).with(3.0)
+      end
+    end
+
+    it 'does not retry 409 without an idempotency key' do
+      retrying = described_class.new(api_key: api_key, max_retries: 2)
+      stub = stub_status(409)
+      expect { retrying.send_event(channel: 'general', title: 'x') }.to raise_error(Trigv::ConflictError)
+      expect(stub).to have_been_requested.once
+    end
   end
 end

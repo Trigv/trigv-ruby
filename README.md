@@ -63,15 +63,15 @@ puts result.event.public_id
 
 | Field | Required | Description |
 |-------|:--------:|-------------|
-| `channel` | Yes | Channel slug (e.g. `general`) |
-| `title` | Yes | Notification title |
-| `description` | No | Body text |
-| `image_url` | No | HTTPS image URL (not stored server-side) |
+| `channel` | Yes | Channel slug (e.g. `general`, max 120 characters) |
+| `title` | Yes | Notification title (max 255 characters) |
+| `description` | No | Body text (max 1000 characters) |
+| `image_url` | No | Image URL (max 2048 characters; not stored server-side) |
 | `url` | No | Destination URL for the notification (max 2048 characters; not stored server-side) |
 | `level` | No | `info`, `success`, `warning`, `error` (default: `info`) |
 | `delivery_urgency` | No | `standard` or `time_sensitive` (default: `standard`) |
-| `event_type` | No | Free-form label (e.g. `deploy.completed`) |
-| `idempotency_key` | No | Dedup key per workspace |
+| `event_type` | No | Free-form label (e.g. `deploy.completed`, max 120 characters) |
+| `idempotency_key` | No | Dedup key per workspace (max 190 characters) |
 
 ## Levels
 
@@ -87,7 +87,7 @@ puts result.event.public_id
 
 ## Idempotency
 
-When you set `idempotency_key`, retries with the same key return the existing event (`duplicate: true`, HTTP 200) without billing again.
+When you set `idempotency_key`, retries with the same key return the existing event (`duplicate: true`, HTTP 200, message `already stored`) without billing again. A 409 or 503 is retried with the same key, honouring `Retry-After`.
 
 ```ruby
 result = client.send_event(
@@ -108,17 +108,29 @@ rescue Trigv::ValidationError => e
   puts e.errors
 rescue Trigv::NotFoundError
   puts 'Channel not found'
-rescue Trigv::RateLimitError => e
-  puts e.retryable ? 'Retry later' : 'Monthly limit reached'
+rescue Trigv::RateLimitError, Trigv::ConflictError, Trigv::ServiceUnavailableError => e
+  puts "Retry in #{e.retry_after_seconds}s (request id #{e.request_id})"
 end
 ```
+
+| Error | HTTP | Retried (with `idempotency_key`) |
+|-------|------|:---:|
+| `Trigv::AuthenticationError` | 401 | No |
+| `Trigv::AuthorizationError` | 403 | No |
+| `Trigv::NotFoundError` | 404 | No |
+| `Trigv::ConflictError` | 409, same key being delivered | Yes |
+| `Trigv::ValidationError` | 422 | No |
+| `Trigv::RateLimitError` | 429, 60 requests per minute per workspace | Yes |
+| `Trigv::ServiceUnavailableError` | 503, push unavailable | Yes |
+
+Retries wait for `Retry-After`. Every error has `request_id`, the `X-Request-ID` header. Quote it to support.
 
 ## Configuration
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `api_key` | `TRIGV_API_KEY` env | Workspace API key |
-| `base_url` | `https://api.trigv.com/api` | API base URL |
+| `base_url` | `https://api.trigv.com` | API base URL. A URL ending in `/api` still works |
 | `timeout` | `30` | Request timeout (seconds) |
 | `max_retries` | `2` | Retries for retryable errors |
 
