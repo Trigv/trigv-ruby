@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rate limit is 60 requests per minute per workspace.
 - Invalid JSON bodies return 422 and map to `Trigv::ValidationError`.
 - A `Retry-After` longer than the client `timeout` is not waited for: the 409, 429 or 503 error is raised at once.
+- Changed: README and package metadata link to trigv.com docs
 
 ### Added
 

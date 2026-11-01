@@ -1,5 +1,7 @@
 # trigv
 
+[Docs](https://trigv.com/docs/sdks/ruby/) | [API reference](https://trigv.com/docs/api/) | [Free tools](https://trigv.com/tools/) | [Get an API key](https://app.trigv.com/register)
+
 Official Trigv SDK for Ruby. Send notification events from scripts, servers, and CI pipelines.
 
 ## What Trigv is

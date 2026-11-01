@@ -16,7 +16,9 @@ Gem::Specification.new do |spec|
 
   spec.metadata = {
     'homepage_uri' => spec.homepage,
+    'documentation_uri' => 'https://trigv.com/docs/sdks/ruby/',
     'source_code_uri' => 'https://github.com/Trigv/trigv-ruby',
+    'bug_tracker_uri' => 'https://github.com/Trigv/trigv-ruby/issues',
     'changelog_uri' => 'https://github.com/Trigv/trigv-ruby/blob/main/CHANGELOG.md',
     'rubygems_mfa_required' => 'true'
   }
