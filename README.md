@@ -11,7 +11,7 @@ Trigv delivers developer notifications to your team's devices. Your backend send
 Add to your Gemfile:
 
 ```ruby
-gem 'trigv', '~> 0.1'
+gem 'trigv', '~> 1.1'
 ```
 
 Then run:

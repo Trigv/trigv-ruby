@@ -369,4 +369,27 @@ RSpec.describe Trigv::Client do
       expect(stub).to have_been_requested.once
     end
   end
+
+  describe 'hardening' do
+    it 'does not show the API key in inspect' do
+      expect(client.inspect).not_to include(api_key)
+      expect(client.inspect).to include('https://api.trigv.com')
+    end
+
+    it 'raises an ApiError, not a TypeError, when the body is a JSON array' do
+      stub_request(:post, 'https://api.trigv.com/v1/events')
+        .to_return(status: 202, body: '[]')
+
+      expect { client.send_event(channel: 'general', title: 'x') }
+        .to raise_error(Trigv::ApiError) { |e| expect(e.status_code).to eq(202) }
+    end
+
+    it 'maps an error response with a JSON string body to ApiError' do
+      stub_request(:post, 'https://api.trigv.com/v1/events')
+        .to_return(status: 500, body: '"oops"')
+
+      expect { client.send_event(channel: 'general', title: 'x') }
+        .to raise_error(Trigv::ApiError) { |e| expect(e.status_code).to eq(500) }
+    end
+  end
 end

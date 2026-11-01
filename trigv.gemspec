@@ -10,13 +10,14 @@ Gem::Specification.new do |spec|
 
   spec.summary = 'Official Trigv SDK for Ruby — send notification events to your workspace'
   spec.description = 'Thin HTTP client for the Trigv workspace ingest API (events and connection verification).'
-  spec.homepage = 'https://github.com/Trigv/trigv-ruby'
+  spec.homepage = 'https://trigv.com'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.2'
 
   spec.metadata = {
     'homepage_uri' => spec.homepage,
     'source_code_uri' => 'https://github.com/Trigv/trigv-ruby',
+    'changelog_uri' => 'https://github.com/Trigv/trigv-ruby/blob/main/CHANGELOG.md',
     'rubygems_mfa_required' => 'true'
   }
 

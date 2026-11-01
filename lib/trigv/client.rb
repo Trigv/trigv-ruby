@@ -43,6 +43,11 @@ module Trigv
       "trigv-ruby/#{VERSION}"
     end
 
+    # Keep the API key out of logs, consoles and exception reports that call inspect.
+    def inspect
+      "#<#{self.class.name} base_url=#{base_url.inspect} timeout=#{timeout} max_retries=#{max_retries}>"
+    end
+
     def send_event(**params)
       body = Validation.validate_send_event_params(params)
       has_idempotency = body.key?('idempotency_key')
@@ -168,7 +173,8 @@ module Trigv
     def parse_json(text)
       return nil if text.nil? || text.empty?
 
-      JSON.parse(text)
+      parsed = JSON.parse(text)
+      parsed.is_a?(Hash) ? parsed : nil
     rescue JSON::ParserError
       nil
     end
