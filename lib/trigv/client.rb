@@ -12,11 +12,11 @@ module Trigv
     keyword_init: true
   )
 
-  SendEventResult = Struct.new(:event, :duplicate, keyword_init: true)
+  SendEventResult = Struct.new(:event, :duplicate, :request_id, keyword_init: true)
 
   ConnectionWorkspace = Struct.new(:public_id, :name, keyword_init: true)
   ConnectionApiKey = Struct.new(:public_id, :name, :prefix, keyword_init: true)
-  ConnectionResult = Struct.new(:workspace, :api_key, keyword_init: true)
+  ConnectionResult = Struct.new(:workspace, :api_key, :request_id, keyword_init: true)
 
   class Client
     attr_reader :api_key, :base_url, :timeout, :max_retries
@@ -55,7 +55,7 @@ module Trigv
       request_with_retry(:post, '/v1/events', body, allow_retry: has_idempotency) do |status, parsed, headers|
         if [200, 202].include?(status) && parsed&.dig('event')
           event = parse_event(parsed['event'])
-          SendEventResult.new(event: event, duplicate: status == 200)
+          SendEventResult.new(event: event, duplicate: status == 200, request_id: headers['x-request-id'])
         else
           error_from_response(status, parsed, headers)
         end
@@ -65,7 +65,7 @@ module Trigv
     def verify_connection
       request_with_retry(:get, '/v1/connection', nil, allow_retry: true) do |status, parsed, headers|
         if status == 200 && parsed&.dig('workspace') && parsed['api_key']
-          parse_connection_result(parsed)
+          parse_connection_result(parsed, headers['x-request-id'])
         else
           error_from_response(status, parsed, headers)
         end
@@ -191,7 +191,7 @@ module Trigv
       )
     end
 
-    def parse_connection_result(parsed)
+    def parse_connection_result(parsed, request_id = nil)
       workspace_data = parsed['workspace']
       api_key_data = parsed['api_key']
 
@@ -210,7 +210,8 @@ module Trigv
 
       ConnectionResult.new(
         workspace: ConnectionWorkspace.new(**symbolize_keys(workspace_data)),
-        api_key: ConnectionApiKey.new(**symbolize_keys(api_key_data))
+        api_key: ConnectionApiKey.new(**symbolize_keys(api_key_data)),
+        request_id: request_id
       )
     rescue ArgumentError, KeyError, TypeError
       raise ValidationError.new('Invalid connection response payload', {})

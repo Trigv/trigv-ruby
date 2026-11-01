@@ -4,7 +4,9 @@ require 'trigv'
 
 client = Trigv::Client.new
 
-client.send_event(
+result = client.send_event(
   channel: 'general',
   title: 'Hello from Ruby'
 )
+
+puts result.request_id

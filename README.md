@@ -57,6 +57,7 @@ result = client.send_event(
 )
 
 puts result.event.public_id
+puts result.request_id # X-Request-ID header, or nil if missing
 ```
 
 ## Event options
@@ -123,7 +124,7 @@ end
 | `Trigv::RateLimitError` | 429, 60 requests per minute per workspace | Yes |
 | `Trigv::ServiceUnavailableError` | 503, push unavailable | Yes |
 
-Retries wait for `Retry-After`. If `Retry-After` is longer than the client `timeout`, the error is raised at once. 502 and 504 responses, network errors and timeouts are also retried (with an `idempotency_key`), and so is `verify_connection`. Every error has `request_id`, the `X-Request-ID` header. Quote it to support.
+Retries wait for `Retry-After`. If `Retry-After` is longer than the client `timeout`, the error is raised at once. 502 and 504 responses, network errors and timeouts are also retried (with an `idempotency_key`), and so is `verify_connection`. Every error has `request_id`, the `X-Request-ID` header. Successful results have `request_id` too (`nil` if missing). Quote it to support.
 
 ## Configuration
 
@@ -139,6 +140,7 @@ Retries wait for `Retry-After`. If `Retry-After` is longer than the client `time
 ```ruby
 connection = client.verify_connection
 puts connection.workspace.name
+puts connection.request_id # X-Request-ID header, or nil if missing
 ```
 
 ## Examples

@@ -144,6 +144,46 @@ RSpec.describe Trigv::Client do
     expect(result.workspace.name).to eq('Test')
   end
 
+  def connection_json
+    {
+      workspace: { public_id: 'ws_1', name: 'Test' },
+      api_key: { public_id: 'key_1', name: 'Default', prefix: 'trgv_testkey1' }
+    }.to_json
+  end
+
+  it 'exposes request_id on send_event results' do
+    stub_request(:post, "#{base_url}/v1/events")
+      .to_return(
+        status: 202,
+        body: { event: sample_event }.to_json,
+        headers: { 'Content-Type' => 'application/json', 'X-Request-ID' => 'req_abc123' }
+      )
+
+    result = client.send_event(channel: 'general', title: 'Hello')
+    expect(result.request_id).to eq('req_abc123')
+  end
+
+  it 'has a nil request_id on send_event when the header is missing' do
+    stub_request(:post, "#{base_url}/v1/events")
+      .to_return(status: 202, body: { event: sample_event }.to_json, headers: { 'Content-Type' => 'application/json' })
+
+    result = client.send_event(channel: 'general', title: 'Hello')
+    expect(result.request_id).to be_nil
+  end
+
+  it 'exposes request_id on verify_connection results' do
+    stub_request(:get, "#{base_url}/v1/connection")
+      .to_return(status: 200, body: connection_json, headers: { 'X-Request-ID' => 'req_conn1' })
+
+    expect(client.verify_connection.request_id).to eq('req_conn1')
+  end
+
+  it 'has a nil request_id on verify_connection when the header is missing' do
+    stub_request(:get, "#{base_url}/v1/connection").to_return(status: 200, body: connection_json)
+
+    expect(client.verify_connection.request_id).to be_nil
+  end
+
   it 'does not expose API key in error messages' do
     stub_request(:post, "#{base_url}/v1/events")
       .to_return(status: 401, body: { message: 'Unauthorized' }.to_json, headers: { 'Content-Type' => 'application/json' })
