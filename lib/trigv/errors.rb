@@ -49,10 +49,19 @@ module Trigv
   class RateLimitError < Error
     attr_reader :status_code, :retry_after_seconds
 
-    def initialize(message, retry_after_seconds: nil)
+    # +retryable:+ is accepted and ignored so code written for 1.0 keeps working.
+    def initialize(message, retry_after_seconds: nil, retryable: true) # rubocop:disable Lint/UnusedMethodArgument
       super(message)
       @status_code = 429
       @retry_after_seconds = retry_after_seconds
+    end
+
+    # Always true.
+    #
+    # @deprecated Kept so code written for 1.0 still works. Every 429 is a rate limit:
+    #   wait +retry_after_seconds+ and try again. There is no monthly cap any more.
+    def retryable # rubocop:disable Naming/PredicateMethod
+      true
     end
   end
 
@@ -100,6 +109,17 @@ module Trigv
   class TimeoutError < Error
     def initialize(message = 'Request timed out')
       super
+    end
+  end
+
+  module Errors
+    module_function
+
+    # Always false.
+    #
+    # @deprecated Kept so code written for 1.0 still works. The monthly event cap was removed.
+    def monthly_limit_message?(_message)
+      false
     end
   end
 end

@@ -345,6 +345,23 @@ RSpec.describe Trigv::Client do
       end
     end
 
+    [409, 429, 503].each do |status|
+      it "raises #{status} at once when Retry-After is longer than the timeout" do
+        retrying = described_class.new(api_key: api_key, max_retries: 2, timeout: 30)
+        calls = 0
+        stub_request(:post, "#{base_url}/v1/events").to_return do
+          calls += 1
+          { status: status, body: { message: 'slow down' }.to_json, headers: { 'Retry-After' => '3600' } }
+        end
+        allow(retrying).to receive(:sleep)
+
+        expect { retrying.send_event(channel: 'general', title: 'x', idempotency_key: 'k1') }
+          .to raise_error(Trigv::Error) { |error| expect(error.retry_after_seconds).to eq(3600) }
+        expect(calls).to eq(1)
+        expect(retrying).not_to have_received(:sleep)
+      end
+    end
+
     it 'does not retry 409 without an idempotency key' do
       retrying = described_class.new(api_key: api_key, max_retries: 2)
       stub = stub_status(409)

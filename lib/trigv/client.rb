@@ -81,6 +81,9 @@ module Trigv
         raise e unless retryable_error?(e)
 
         wait = retry_wait_seconds(e, attempt)
+        # A wait longer than the timeout is not worth sleeping for: raise the real error.
+        raise e if wait > timeout && e.respond_to?(:retry_after_seconds) && e.retry_after_seconds
+
         sleep([wait, timeout].min)
       end
 

@@ -123,7 +123,7 @@ end
 | `Trigv::RateLimitError` | 429, 60 requests per minute per workspace | Yes |
 | `Trigv::ServiceUnavailableError` | 503, push unavailable | Yes |
 
-Retries wait for `Retry-After`. Every error has `request_id`, the `X-Request-ID` header. Quote it to support.
+Retries wait for `Retry-After`. If `Retry-After` is longer than the client `timeout`, the error is raised at once. 502 and 504 responses, network errors and timeouts are also retried (with an `idempotency_key`), and so is `verify_connection`. Every error has `request_id`, the `X-Request-ID` header. Quote it to support.
 
 ## Configuration
 
